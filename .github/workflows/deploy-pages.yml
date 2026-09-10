@@ -1,0 +1,57 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  verify-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm install
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Run unit tests
+        run: npm test
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run end-to-end tests
+        run: npm run test:e2e
+      - name: Build production site
+        run: npm run build
+        env:
+          VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
+      - name: Prepare Pages branch
+        run: |
+          site_dir="$(mktemp -d)"
+          cp -R dist/. "$site_dir/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages
+          git rm -rf . >/dev/null 2>&1 || true
+          rm -rf dist
+          cp -R "$site_dir"/. .
+          touch .nojekyll
+          git add -A
+          git commit -m "deploy: publish CA Buddy to GitHub Pages"
+          git push --force origin gh-pages
+      - name: Report Pages source
+        run: |
+          printf '%s\n' 'The site artifact is published to the gh-pages branch.'
+          printf '%s\n' 'Enable GitHub Pages in repository Settings > Pages with gh-pages as the source branch.'
