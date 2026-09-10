@@ -6,16 +6,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  verify-and-build:
+  verify-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -38,20 +37,37 @@ jobs:
         run: npm run build
         env:
           VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
-      - name: Configure Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
-        with:
-          path: ./dist
-
-  deploy:
-    needs: verify-and-build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+      - name: Prepare Pages branch
+        run: |
+          site_dir="$(mktemp -d)"
+          cp -R dist/. "$site_dir/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan gh-pages
+          git rm -rf . >/dev/null 2>&1 || true
+          rm -rf dist
+          cp -R "$site_dir"/. .
+          touch .nojekyll
+          git add -A
+          git commit -m "deploy: publish CA Buddy to GitHub Pages"
+          git push --force origin gh-pages
+      - name: Configure GitHub Pages source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          payload='{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}'
+          if ! curl --fail --silent --show-error \
+            -X PUT \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages" \
+            -d "$payload"; then
+            curl --fail --silent --show-error \
+              -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages" \
+              -d "$payload"
+          fi
